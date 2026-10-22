@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RecoveryMesh — Database DR Control Plane</title>
+  <meta name="description" content="Interactive database failover, reconciliation, RTO/RPO and controlled failback lab." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">RM</div>
+      <div>
+        <div class="eyebrow">DATABASE / INFRASTRUCTURE DISASTER RECOVERY</div>
+        <h1>RecoveryMesh</h1>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="pill" id="systemMode">NORMAL</span>
+      <button class="button ghost" id="resetBtn">Reset Demo</button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero-grid">
+      <div class="panel architecture-panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">LIVE TOPOLOGY</div>
+            <h2>Active / Standby Database Architecture</h2>
+          </div>
+          <div class="live-dot"><span></span> LIVE</div>
+        </div>
+
+        <div class="topology">
+          <div class="topology-node client">
+            <div class="node-icon">⇢</div>
+            <div><strong>Shipment API</strong><small>Real application traffic</small></div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="topology-node router">
+            <div class="node-icon">R</div>
+            <div><strong>Recovery Router</strong><small id="routerLabel">Routing writes to PRIMARY</small></div>
+          </div>
+          <div class="split-line"><span></span></div>
+          <div class="database-row">
+            <div class="db-card active" id="primaryCard">
+              <div class="db-status"><span class="status-dot"></span><span id="primaryHealth">HEALTHY</span></div>
+              <div class="db-icon">DB</div>
+              <strong>PRIMARY</strong>
+              <small>PostgreSQL :5432</small>
+              <div class="db-count"><span id="primaryCount">0</span> records</div>
+              <div class="role-badge" id="primaryRole">ACTIVE</div>
+            </div>
+            <div class="replication">
+              <span class="replication-line"></span>
+              <small id="replicationLabel">replication</small>
+              <span class="replication-line"></span>
+            </div>
+            <div class="db-card standby" id="secondaryCard">
+              <div class="db-status"><span class="status-dot"></span><span id="secondaryHealth">HEALTHY</span></div>
+              <div class="db-icon">DB</div>
+              <strong>SECONDARY</strong>
+              <small>PostgreSQL :5433</small>
+              <div class="db-count"><span id="secondaryCount">0</span> records</div>
+              <div class="role-badge" id="secondaryRole">STANDBY</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-card"><span>ACTIVE SITE</span><strong id="activeSite">PRIMARY</strong><small id="activeSiteNote">Normal operations</small></div>
+        <div class="metric-card"><span>LAST RTO</span><strong><span id="rto">—</span></strong><small>Recovery time objective</small></div>
+        <div class="metric-card"><span>REPLICATION LAG</span><strong id="lag">0</strong><small>record delta</small></div>
+        <div class="metric-card"><span>QUEUED WRITES</span><strong id="queued">0</strong><small>protected during failover</small></div>
+        <div class="metric-card"><span>TRANSACTIONS</span><strong id="accepted">0</strong><small>accepted by mesh</small></div>
+        <div class="metric-card"><span>FAILOVERS</span><strong id="failovers">0</strong><small>automatic site switches</small></div>
+      </div>
+    </section>
+
+    <section class="workspace-grid">
+      <div class="panel intake-panel">
+        <div class="panel-head">
+          <div><div class="eyebrow">REAL TRAFFIC</div><h2>Shipment Intake</h2></div>
+          <button class="button secondary" id="generate50Btn">Generate 50</button>
+        </div>
+        <form id="shipmentForm" class="form-grid">
+          <label>Shipment ID<input id="shipmentId" placeholder="SHP-10482" /></label>
+          <label>Customer<input id="customer" placeholder="Acme Logistics" /></label>
+          <label>Origin<input id="origin" value="Memphis, TN" /></label>
+          <label>Destination<input id="destination" value="Dallas, TX" /></label>
+          <label class="span-2">Amount<input id="amount" type="number" step="0.01" value="2450" /></label>
+          <button class="button primary span-2" type="submit">Submit Transaction</button>
+        </form>
+        <div id="submitResult" class="result-line">Transactions will be written to the currently active database.</div>
+      </div>
+
+      <div class="panel failure-panel">
+        <div class="panel-head"><div><div class="eyebrow">FAILURE LAB</div><h2>Break it. Recover it.</h2></div></div>
+        <div class="failure-actions">
+          <button class="action danger" id="failPrimaryBtn"><span>01</span><div><strong>Fail PRIMARY</strong><small>Inject database connectivity failure</small></div></button>
+          <button class="action" id="restorePrimaryBtn"><span>02</span><div><strong>Restore PRIMARY</strong><small>Bring the original site back online</small></div></button>
+          <button class="action" id="reconcileBtn"><span>03</span><div><strong>Reconcile Data</strong><small>Synchronize missing transactions</small></div></button>
+          <button class="action success" id="failbackBtn"><span>04</span><div><strong>Controlled Failback</strong><small>Return traffic after synchronization</small></div></button>
+        </div>
+        <div class="status-banner" id="lastAction">System initialized</div>
+      </div>
+    </section>
+
+    <section class="data-grid">
+      <div class="panel transactions-panel">
+        <div class="panel-head"><div><div class="eyebrow">DATA CONSISTENCY</div><h2>Recent Transactions</h2></div><span class="sync-badge" id="syncBadge">IN SYNC</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Shipment</th><th>Route</th><th>Accepted By</th><th>Primary</th><th>Secondary</th></tr></thead>
+            <tbody id="transactionsBody"><tr><td colspan="5" class="empty">No transactions yet.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel timeline-panel">
+        <div class="panel-head"><div><div class="eyebrow">INCIDENT TIMELINE</div><h2>Recovery Events</h2></div></div>
+        <div class="timeline" id="timeline"><div class="empty">Waiting for events…</div></div>
+      </div>
+    </section>
+
+    <section class="footer-note">
+      <strong>Portfolio DR Lab.</strong> The public demo intentionally co-locates both PostgreSQL nodes in one ephemeral runtime to keep hosting inexpensive. The reference architecture treats PRIMARY and SECONDARY as separate failure domains.
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

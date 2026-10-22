@@ -1,0 +1,25 @@
+# RecoveryMesh public demo runtime.
+# The two PostgreSQL clusters are intentionally co-located in one ephemeral
+# Cloudflare Container for portfolio/demo economics only. The reference
+# architecture assumes independent failure domains.
+
+FROM maven:3.9.9-eclipse-temurin-21 AS build
+WORKDIR /workspace
+COPY pom.xml ./
+COPY src ./src
+RUN mvn -B -ntp package -DskipTests
+
+FROM eclipse-temurin:21-jre-jammy
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash ca-certificates netcat-openbsd postgresql postgresql-client procps \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=build /workspace/target/recoverymesh-*.jar /app/recoverymesh.jar
+COPY cloudflare/start-demo.sh /app/start-demo.sh
+RUN chmod +x /app/start-demo.sh
+
+EXPOSE 8080
+ENTRYPOINT ["/app/start-demo.sh"]

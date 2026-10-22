@@ -1,0 +1,47 @@
+services:
+  primary-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: recoverymesh
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d recoverymesh"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  secondary-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: recoverymesh
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d recoverymesh"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  recoverymesh:
+    build: .
+    depends_on:
+      primary-db:
+        condition: service_healthy
+      secondary-db:
+        condition: service_healthy
+    environment:
+      PRIMARY_DB_URL: jdbc:postgresql://primary-db:5432/recoverymesh
+      PRIMARY_DB_USER: postgres
+      PRIMARY_DB_PASSWORD: postgres
+      SECONDARY_DB_URL: jdbc:postgresql://secondary-db:5432/recoverymesh
+      SECONDARY_DB_USER: postgres
+      SECONDARY_DB_PASSWORD: postgres
+      REPLICATION_DELAY_MS: 250
+      FAILOVER_DELAY_MS: 1800
+    ports:
+      - "8080:8080"

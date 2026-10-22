@@ -1,0 +1,30 @@
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: recoverymesh
+  lifecycle:
+    timeout-per-shutdown-phase: 10s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+recoverymesh:
+  primary:
+    url: ${PRIMARY_DB_URL:jdbc:postgresql://localhost:5432/recoverymesh}
+    username: ${PRIMARY_DB_USER:postgres}
+    password: ${PRIMARY_DB_PASSWORD:postgres}
+  secondary:
+    url: ${SECONDARY_DB_URL:jdbc:postgresql://localhost:5433/recoverymesh}
+    username: ${SECONDARY_DB_USER:postgres}
+    password: ${SECONDARY_DB_PASSWORD:postgres}
+  replication-delay-ms: ${REPLICATION_DELAY_MS:250}
+  failover-delay-ms: ${FAILOVER_DELAY_MS:1800}

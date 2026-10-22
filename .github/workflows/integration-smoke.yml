@@ -1,0 +1,108 @@
+name: recoverymesh-integration-smoke
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  dr-smoke:
+    runs-on: ubuntu-latest
+    services:
+      primary:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: recoverymesh
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d recoverymesh"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+      secondary:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: recoverymesh
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d recoverymesh"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build
+        run: mvn -B -ntp package -DskipTests
+
+      - name: Start RecoveryMesh
+        env:
+          PRIMARY_DB_URL: jdbc:postgresql://127.0.0.1:5432/recoverymesh
+          PRIMARY_DB_USER: postgres
+          PRIMARY_DB_PASSWORD: postgres
+          SECONDARY_DB_URL: jdbc:postgresql://127.0.0.1:5433/recoverymesh
+          SECONDARY_DB_USER: postgres
+          SECONDARY_DB_PASSWORD: postgres
+          REPLICATION_DELAY_MS: 100
+          FAILOVER_DELAY_MS: 700
+        run: |
+          java -jar target/recoverymesh-*.jar > recoverymesh.log 2>&1 &
+          echo $! > recoverymesh.pid
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8080/api/status >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat recoverymesh.log
+          exit 1
+
+      - name: Verify normal writes replicate
+        run: |
+          curl -fsS -X POST http://127.0.0.1:8080/api/transactions             -H 'Content-Type: application/json'             -d '{"shipmentId":"CI-PRIMARY-001","customer":"CI","origin":"Memphis, TN","destination":"Dallas, TX","amount":1000}'
+          sleep 1
+          STATUS="$(curl -fsS http://127.0.0.1:8080/api/status)"
+          echo "$STATUS"
+          echo "$STATUS" | jq -e '.activeSite=="PRIMARY" and .primaryRecords==1 and .secondaryRecords==1 and .inSync==true'
+
+      - name: Fail PRIMARY and verify SECONDARY takes traffic
+        run: |
+          curl -fsS -X POST http://127.0.0.1:8080/api/control/fail-primary
+          sleep 2
+          STATUS="$(curl -fsS http://127.0.0.1:8080/api/status)"
+          echo "$STATUS"
+          echo "$STATUS" | jq -e '.activeSite=="SECONDARY" and .primaryHealthy==false and .failoverCount==1 and .lastRtoMs>0'
+
+          curl -fsS -X POST http://127.0.0.1:8080/api/transactions             -H 'Content-Type: application/json'             -d '{"shipmentId":"CI-DR-002","customer":"CI","origin":"Nashville, TN","destination":"Atlanta, GA","amount":1250}'
+          sleep 1
+          curl -fsS http://127.0.0.1:8080/api/transactions | jq -e 'map(select(.shipmentId=="CI-DR-002" and .acceptedBy=="SECONDARY")) | length==1'
+
+      - name: Restore, reconcile and fail back
+        run: |
+          curl -fsS -X POST http://127.0.0.1:8080/api/control/restore-primary
+          sleep 2
+          STATUS="$(curl -fsS http://127.0.0.1:8080/api/status)"
+          echo "$STATUS"
+          echo "$STATUS" | jq -e '.primaryHealthy==true and .secondaryHealthy==true and .inSync==true'
+
+          curl -fsS -X POST http://127.0.0.1:8080/api/control/failback
+          STATUS="$(curl -fsS http://127.0.0.1:8080/api/status)"
+          echo "$STATUS"
+          echo "$STATUS" | jq -e '.activeSite=="PRIMARY" and .mode=="NORMAL" and .primaryRecords==2 and .secondaryRecords==2'
+
+      - name: Dump logs on failure
+        if: failure()
+        run: cat recoverymesh.log || true
